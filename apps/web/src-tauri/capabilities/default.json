@@ -1,0 +1,12 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for TmPlan",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "fs:default",
+    "shell:default"
+  ]
+}
