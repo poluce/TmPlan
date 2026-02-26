@@ -1,5 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/nicegui/static/tauri/tauri-conf-schema.json",
+
   "plugins": {
     "shell": {
       "open": true
@@ -15,7 +16,6 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "title": "TmPlan",
     "windows": [
       {
         "title": "TmPlan",
