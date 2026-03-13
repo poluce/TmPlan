@@ -12,12 +12,31 @@ interface UseProjectImportOptions {
   projectId: string
 }
 
+type ModuleStatus = 'pending' | 'in_progress' | 'completed'
+type ModulePriority = 'low' | 'medium' | 'high' | 'critical'
+
+function toModuleStatus(value: string | null | undefined): ModuleStatus {
+  if (value === 'pending' || value === 'in_progress' || value === 'completed') {
+    return value
+  }
+  return 'pending'
+}
+
+function toModulePriority(value: string | null | undefined): ModulePriority {
+  if (value === 'low' || value === 'medium' || value === 'high' || value === 'critical') {
+    return value
+  }
+  return 'medium'
+}
+
 export function useProjectImport({ projectId }: UseProjectImportOptions) {
   const [importing, setImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeProfile = useActiveProfile()
   const importPhaseResults = useGuideStore((s) => s.importPhaseResults)
-  const { updateProjectMeta, addFeatureModules, addImplModules } = useBoardStore()
+  const updateProjectMeta = useBoardStore((s) => s.updateProjectMeta)
+  const addFeatureModules = useBoardStore((s) => s.addFeatureModules)
+  const addImplModules = useBoardStore((s) => s.addImplModules)
 
   async function handleImport(file: File) {
     if (file.size > 200 * 1024) {
@@ -33,34 +52,71 @@ export function useProjectImport({ projectId }: UseProjectImportOptions) {
         const astResult = await importMarkdownAST(projectId, markdown)
         if (astResult.anchorsFound > 0 || astResult.modules.length > 0) {
           const now = new Date().toISOString()
-          for (const mod of astResult.modules) {
-            addImplModules([{
-              module: mod.module,
-              slug: mod.slug,
-              layer: 'implementation' as const,
-              status: (mod.status as 'pending' | 'in_progress' | 'completed') || 'pending',
-              depends_on: [...mod.depends_on],
-              decision_refs: [],
-              overview: mod.overview,
-              priority: (mod.priority || 'medium') as 'low' | 'medium' | 'high' | 'critical',
-              estimated_hours: null,
-              created_at: now,
-              updated_at: now,
-              tasks: mod.tasks.map((t) => ({
-                id: t.id,
-                title: t.title,
-                status: (t.status as 'pending' | 'completed') || 'pending',
-                depends_on: [],
-                detail: '',
-                files_to_create: [],
-                files_to_modify: [],
-                acceptance_criteria: [],
+          const importedModules = astResult.modules.map((mod) => ({
+            module: mod.module,
+            slug: mod.slug,
+            layer: 'implementation' as const,
+            status: toModuleStatus(mod.status),
+            depends_on: [...mod.depends_on],
+            decision_refs: [],
+            overview: mod.overview,
+            priority: toModulePriority(mod.priority),
+            estimated_hours: null,
+            created_at: now,
+            updated_at: now,
+            tasks: mod.tasks.map((task) => ({
+              id: task.id,
+              title: task.title,
+              status: task.status === 'completed' ? 'completed' as const : 'pending' as const,
+              depends_on: [],
+              detail: '',
+              files_to_create: [],
+              files_to_modify: [],
+              acceptance_criteria: [],
+            })),
+          }))
+
+          addImplModules(importedModules)
+
+          const projectName = typeof astResult.project.name === 'string' ? astResult.project.name : ''
+          const projectDescription = typeof astResult.project.description === 'string' ? astResult.project.description : ''
+          if (projectName) {
+            updateProjectMeta(projectName, projectDescription)
+          }
+
+          const importedPhases: PhaseResult[] = [
+            {
+              phase: 'concept',
+              project_name: projectName || '项目计划',
+              description: projectDescription,
+              target_users: '',
+              message: '通过 Markdown AST 导入项目概念。',
+            },
+            {
+              phase: 'tech-impl',
+              tech_stack: [],
+              modules: importedModules.map((module) => ({
+                module: module.module,
+                slug: module.slug,
+                overview: module.overview,
+                priority: module.priority,
+                depends_on: [...module.depends_on],
+                tasks: module.tasks.map((task) => ({
+                  id: task.id,
+                  title: task.title,
+                  detail: task.detail,
+                  depends_on: [...task.depends_on],
+                  files_to_create: [...task.files_to_create],
+                  files_to_modify: [...task.files_to_modify],
+                  acceptance_criteria: [...task.acceptance_criteria],
+                })),
               })),
-            }])
-          }
-          if (astResult.project.name) {
-            updateProjectMeta(astResult.project.name as string, (astResult.project.description as string) ?? '')
-          }
+              decisions: [],
+              message: '通过 Markdown AST 导入技术实现模块。',
+            },
+          ]
+
+          importPhaseResults(importedPhases)
           toast.success(`AST 解析成功：${astResult.modules.length} 个模块，${astResult.anchorsFound} 个锚点匹配`)
           return
         }
@@ -117,7 +173,7 @@ export function useProjectImport({ projectId }: UseProjectImportOptions) {
               depends_on: m.depends_on || [],
               decision_refs: [],
               overview: m.overview,
-              priority: (m.priority || 'medium') as 'low' | 'medium' | 'high' | 'critical',
+              priority: toModulePriority(m.priority),
               estimated_hours: null,
               created_at: now,
               updated_at: now,

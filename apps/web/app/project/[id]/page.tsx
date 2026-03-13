@@ -19,7 +19,6 @@ import type { DocFile } from '@/lib/tmplan/data-access'
 import { useProjectImport } from '@/hooks/use-project-import'
 import { useProjectExport } from '@/hooks/use-project-export'
 import { useDocumentConverter } from '@/hooks/use-document-converter'
-import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
@@ -27,6 +26,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const searchParams = useSearchParams()
   const projectId = decodeURIComponent(id)
   const isNew = searchParams.get('new') === '1'
+  const enabledDocPaths = useSettingsStore((s) =>
+    s.docPaths.filter((docPath) => docPath.enabled).map((docPath) => docPath.path)
+  )
 
   const guideReset = useGuideStore((s) => s.reset)
   const touchProject = useProjectStore((s) => s.touchProject)
@@ -41,6 +43,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const { convertProgress, isConverting, handleConvert } = useDocumentConverter({ projectId, projectDocs })
 
   useEffect(() => {
+    setActiveTab('docs')
+    setProjectDocs([])
+  }, [projectId])
+
+  useEffect(() => {
     if (isNew) {
       guideReset()
       setShowGuide(true)
@@ -48,17 +55,24 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   }, [guideReset, isNew, projectId])
 
   useEffect(() => {
+    let cancelled = false
+
     touchProject(projectId)
 
     readProject(projectId)
       .then((config) => {
+        if (cancelled) return
         useBoardStore.getState().updateProjectMeta(config.name, config.description)
         updateProject(projectId, { name: config.name, description: config.description })
       })
-      .catch(() => {})
+      .catch((error) => {
+        if (cancelled) return
+        toast.error(error instanceof Error ? error.message : '读取项目信息失败')
+      })
 
     readAllModules(projectId)
       .then((modules) => {
+        if (cancelled) return
         useBoardStore.getState().setModules(modules)
         useBoardStore.setState({ projectPath: projectId })
         const completedModules = modules.filter((module) => module.status === 'completed').length
@@ -67,23 +81,38 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           completedModules,
         })
       })
-      .catch(() => {})
+      .catch((error) => {
+        if (cancelled) return
+        toast.error(error instanceof Error ? error.message : '读取模块失败')
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [projectId, touchProject, updateProject])
 
   useEffect(() => {
-    const enabledPaths = useSettingsStore.getState().docPaths
-      .filter((docPath) => docPath.enabled)
-      .map((docPath) => docPath.path)
+    let cancelled = false
 
-    if (enabledPaths.length === 0) {
+    if (enabledDocPaths.length === 0) {
       setProjectDocs([])
       return
     }
 
-    readDocs(projectId, enabledPaths)
-      .then(setProjectDocs)
-      .catch(() => {})
-  }, [projectId])
+    readDocs(projectId, enabledDocPaths)
+      .then((docs) => {
+        if (cancelled) return
+        setProjectDocs(docs)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        toast.error(error instanceof Error ? error.message : '读取文档失败')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [enabledDocPaths, projectId])
 
   return (
     <div className="flex h-full">
@@ -103,7 +132,13 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             onManualCheck={() => toast.info('手动检查功能开发中')}
             onAddModule={() => toast.info('新增模块功能开发中')}
             onImport={() => fileInputRef.current?.click()}
-            onExport={handleExport}
+            onExport={async () => {
+              try {
+                await handleExport()
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : '导出失败')
+              }
+            }}
             importing={importing}
             isConverting={isConverting}
             canExport={canExport}

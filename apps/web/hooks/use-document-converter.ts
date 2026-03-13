@@ -12,6 +12,49 @@ interface UseDocumentConverterOptions {
   projectDocs: DocFile[]
 }
 
+function updateProgressFromEvent(
+  prev: ConvertProgress,
+  event: ConvertStreamEvent
+): ConvertProgress {
+  switch (event.step) {
+    case 'reading': {
+      const nextDocStatus = Object.entries(prev.docStatus).reduce<Record<string, 'pending' | 'reading' | 'done'>>((acc, [path, status]) => {
+        return {
+          ...acc,
+          [path]: status === 'reading' ? 'done' : status,
+        }
+      }, {})
+      return {
+        ...prev,
+        docStatus: { ...nextDocStatus, [event.doc]: 'reading' },
+        overall: 'reading',
+        message: `读取 ${event.doc}...`,
+      }
+    }
+    case 'analyzing': {
+      const doneStatus = Object.keys(prev.docStatus).reduce<Record<string, 'pending' | 'reading' | 'done'>>((acc, path) => {
+        return { ...acc, [path]: 'done' }
+      }, {})
+      return {
+        ...prev,
+        docStatus: doneStatus,
+        overall: 'analyzing',
+        message: `AI 分析中... (${event.docsCount} 篇文档)`,
+      }
+    }
+    case 'writing_module':
+      return { ...prev, overall: 'writing', message: `写入模块: ${event.name}` }
+    case 'writing_decision':
+      return { ...prev, overall: 'writing', message: `写入决策 #${event.id}` }
+    case 'done':
+      return { ...prev, overall: 'done', message: `转换完成：${event.modules} 个模块，${event.decisions} 个决策` }
+    case 'error':
+      return { ...prev, overall: 'error', message: event.message }
+    default:
+      return prev
+  }
+}
+
 export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConverterOptions) {
   const [convertProgress, setConvertProgress] = useState<ConvertProgress | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -26,7 +69,7 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
   async function handleConvert() {
     if (isConverting) {
       abortRef.current?.abort()
-      setConvertProgress(null)
+      setConvertProgress((prev) => prev ? { ...prev, overall: 'idle', message: '转换已取消' } : null)
       toast.info('转换已取消')
       return
     }
@@ -45,16 +88,15 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
       return { ...acc, [doc.path]: 'pending' }
     }, {})
 
-    setConvertProgress({
+    const initialProgress: ConvertProgress = {
       docStatus: initialStatus,
       overall: 'reading',
       message: '准备读取文档...',
-    })
+    }
+    setConvertProgress(initialProgress)
 
     const controller = new AbortController()
     abortRef.current = controller
-
-    let finalMessage = '转换完成'
 
     try {
       await convertDocsStream(
@@ -69,49 +111,7 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
         (event: ConvertStreamEvent) => {
           setConvertProgress((prev) => {
             if (!prev) return prev
-            switch (event.step) {
-              case 'reading': {
-                const nextDocStatus = Object.entries(prev.docStatus).reduce<Record<string, 'pending' | 'reading' | 'done'>>((acc, [path, status]) => {
-                  return {
-                    ...acc,
-                    [path]: status === 'reading' ? 'done' : status,
-                  }
-                }, {})
-                finalMessage = `读取 ${event.doc}...`
-                return {
-                  ...prev,
-                  docStatus: { ...nextDocStatus, [event.doc]: 'reading' },
-                  overall: 'reading',
-                  message: finalMessage,
-                }
-              }
-              case 'analyzing': {
-                const doneStatus = Object.keys(prev.docStatus).reduce<Record<string, 'pending' | 'reading' | 'done'>>((acc, path) => {
-                  return { ...acc, [path]: 'done' }
-                }, {})
-                finalMessage = `AI 分析中... (${event.docsCount} 篇文档)`
-                return {
-                  ...prev,
-                  docStatus: doneStatus,
-                  overall: 'analyzing',
-                  message: finalMessage,
-                }
-              }
-              case 'writing_module':
-                finalMessage = `写入模块: ${event.name}`
-                return { ...prev, overall: 'writing', message: finalMessage }
-              case 'writing_decision':
-                finalMessage = `写入决策 #${event.id}`
-                return { ...prev, overall: 'writing', message: finalMessage }
-              case 'done':
-                finalMessage = `转换完成：${event.modules} 个模块，${event.decisions} 个决策`
-                return { ...prev, overall: 'done', message: finalMessage }
-              case 'error':
-                finalMessage = event.message
-                return { ...prev, overall: 'error', message: finalMessage }
-              default:
-                return prev
-            }
+            return updateProgressFromEvent(prev, event)
           })
         },
         controller.signal
@@ -119,7 +119,11 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
 
       const modules = await readAllModules(projectId)
       setModules(modules)
-      toast.success(finalMessage)
+      setConvertProgress((prev) => {
+        if (!prev) return prev
+        toast.success(prev.message)
+        return prev
+      })
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         return

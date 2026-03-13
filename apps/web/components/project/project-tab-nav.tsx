@@ -10,9 +10,17 @@ interface ProjectTabNavProps {
   onTabChange: (value: ProjectTabValue) => void
 }
 
+function isProjectTabValue(value: string): value is ProjectTabValue {
+  return value === 'docs' || value === 'board' || value === 'git' || value === 'progress' || value === 'events'
+}
+
 export function ProjectTabNav({ activeTab, onTabChange }: ProjectTabNavProps) {
   return (
-    <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as ProjectTabValue)}>
+    <Tabs value={activeTab} onValueChange={(value) => {
+      if (isProjectTabValue(value)) {
+        onTabChange(value)
+      }
+    }}>
       <TabsList>
         <TabsTrigger value="docs" className="gap-1.5">
           <FileText className="size-3.5" />
