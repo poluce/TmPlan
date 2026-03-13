@@ -45,15 +45,7 @@ export function AiGuidePanel({ projectPath }: AiGuidePanelProps) {
   const activeProfile = useActiveProfile()
   const [selectedModel, setSelectedModel] = useState(activeProfile?.modelName ?? '')
   const [saving, setSaving] = useState(false)
-  const [hydrated, setHydrated] = useState(false)
-
-  useEffect(() => {
-    setHydrated(true)
-  }, [])
-
-  useEffect(() => {
-    setSelectedModel(activeProfile?.modelName ?? '')
-  }, [activeProfile?.modelName])
+  const hydrated = true
 
   useEffect(() => {
     clearForProject(projectPath)

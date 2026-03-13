@@ -43,14 +43,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const { convertProgress, isConverting, handleConvert } = useDocumentConverter({ projectId, projectDocs })
 
   useEffect(() => {
-    setActiveTab('docs')
-    setProjectDocs([])
-  }, [projectId])
-
-  useEffect(() => {
     if (isNew) {
       guideReset()
-      setShowGuide(true)
     }
   }, [guideReset, isNew, projectId])
 
@@ -94,20 +88,27 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   useEffect(() => {
     let cancelled = false
 
-    if (enabledDocPaths.length === 0) {
-      setProjectDocs([])
-      return
-    }
+    const loadDocs = async () => {
+      if (enabledDocPaths.length === 0) {
+        if (!cancelled) {
+          queueMicrotask(() => {
+            if (!cancelled) setProjectDocs([])
+          })
+        }
+        return
+      }
 
-    readDocs(projectId, enabledDocPaths)
-      .then((docs) => {
+      try {
+        const docs = await readDocs(projectId, enabledDocPaths)
         if (cancelled) return
         setProjectDocs(docs)
-      })
-      .catch((error) => {
+      } catch (error) {
         if (cancelled) return
         toast.error(error instanceof Error ? error.message : '读取文档失败')
-      })
+      }
+    }
+
+    void loadDocs()
 
     return () => {
       cancelled = true
