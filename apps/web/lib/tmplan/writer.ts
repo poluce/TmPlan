@@ -144,6 +144,56 @@ export async function updateStatus(
   await writeYaml(tmplanPath(basePath, 'status.yaml'), orderProjectStatus(status))
 }
 
+// ---- Plans sub-directory (converted from docs) ----
+
+export async function initPlansDir(basePath: string): Promise<void> {
+  const dirs = ['plans', 'plans/modules', 'plans/decisions', '.cache']
+  for (const dir of dirs) {
+    await mkdir(tmplanPath(basePath, dir), { recursive: true })
+  }
+}
+
+export async function writePlanProject(
+  basePath: string,
+  config: ProjectConfig
+): Promise<void> {
+  const dir = tmplanPath(basePath, 'plans')
+  await mkdir(dir, { recursive: true })
+  await writeYaml(join(dir, 'project.yaml'), orderProjectConfig(config))
+}
+
+export async function writePlanModule(
+  basePath: string,
+  plan: ModulePlan
+): Promise<void> {
+  const dir = tmplanPath(basePath, 'plans', 'modules')
+  await mkdir(dir, { recursive: true })
+  await writeYaml(join(dir, `${plan.slug}.yaml`), orderModulePlan(plan))
+}
+
+export async function writePlanDecision(
+  basePath: string,
+  decision: Decision
+): Promise<void> {
+  const dir = tmplanPath(basePath, 'plans', 'decisions')
+  await mkdir(dir, { recursive: true })
+  const fileName = `${String(decision.decision_id).padStart(3, '0')}-${decision.question
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+$/, '')
+    .toLowerCase()}.yaml`
+  await writeYaml(join(dir, fileName), orderDecision(decision))
+}
+
+export async function writePlanCache(
+  basePath: string,
+  key: string,
+  data: unknown
+): Promise<void> {
+  const dir = tmplanPath(basePath, '.cache')
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, `${key}.json`), JSON.stringify(data, null, 2), 'utf-8')
+}
+
 export async function initTmplan(basePath: string): Promise<void> {
   const dirs = ['', 'modules', 'decisions', 'phases']
   for (const dir of dirs) {

@@ -8,7 +8,9 @@ import type {
   ModulePlan,
   Decision,
   ProjectStatus,
+  TaskStatus,
 } from '@/types/tmplan'
+import type { PPFEvent, EventQuery } from '@/types/event-sourcing'
 
 // Lazy-load tauri bridge to avoid import errors in web mode
 async function bridge() {
@@ -26,9 +28,25 @@ async function httpGet<T>(url: string): Promise<T> {
   return res.json()
 }
 
-async function httpPost<T>(url: string, body: unknown): Promise<T> {
+async function httpPost<T>(url: string, body: unknown, traceId?: string): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(traceId ? { 'x-trace-id': traceId } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+async function httpPut<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
@@ -125,3 +143,211 @@ export async function checkTmplanExists(projectPath: string): Promise<boolean> {
 }
 
 export type { FileStatus, ModuleProgress, ProjectProgress } from './tauri-bridge'
+
+// ---- Docs ----
+
+export interface DocFile {
+  path: string
+  name: string
+  content: string
+}
+
+export async function readDocs(
+  projectPath: string,
+  relativePaths: string[]
+): Promise<DocFile[]> {
+  if (relativePaths.length === 0) return []
+  // TODO: Tauri mode support
+  const url = `${plansUrl(projectPath, 'docs')}?paths=${encodeURIComponent(relativePaths.join(','))}`
+  const data = await httpGet<{ files: DocFile[] }>(url)
+  return data.files
+}
+
+// ---- 文档转换 ----
+
+export interface ConvertDocsResult {
+  success: boolean
+  modules: number
+  decisions: number
+}
+
+export interface AiConfig {
+  apiKey: string
+  baseUrl: string
+  modelName: string
+  modelType: string
+  traceId?: string
+}
+
+export async function convertDocs(
+  projectPath: string,
+  docs: DocFile[],
+  aiConfig: AiConfig
+): Promise<ConvertDocsResult> {
+  return httpPost<ConvertDocsResult>(
+    plansUrl(projectPath, 'convert'),
+    { docs, ...aiConfig },
+    aiConfig.traceId
+  )
+}
+
+// ---- SSE 流式转换 ----
+
+export interface ConvertProgress {
+  docStatus: Record<string, 'pending' | 'reading' | 'done'>
+  overall: 'idle' | 'reading' | 'analyzing' | 'writing' | 'done' | 'error'
+  message: string
+}
+
+export type ConvertStreamEvent =
+  | { step: 'reading'; doc: string }
+  | { step: 'analyzing'; docsCount: number }
+  | { step: 'writing_module'; slug: string; name: string }
+  | { step: 'writing_decision'; id: number }
+  | { step: 'done'; modules: number; decisions: number }
+  | { step: 'error'; message: string }
+
+export async function convertDocsStream(
+  projectPath: string,
+  docs: DocFile[],
+  aiConfig: AiConfig,
+  onProgress: (event: ConvertStreamEvent) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const res = await fetch(plansUrl(projectPath, 'convert'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(aiConfig.traceId ? { 'x-trace-id': aiConfig.traceId } : {}),
+    },
+    body: JSON.stringify({ docs, ...aiConfig }),
+    signal,
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || `HTTP ${res.status}`)
+  }
+
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          onProgress(JSON.parse(line.slice(6)))
+        } catch { /* ignore parse errors */ }
+      }
+    }
+  }
+
+  if (buffer.startsWith('data: ')) {
+    try {
+      onProgress(JSON.parse(buffer.slice(6)))
+    } catch { /* ignore */ }
+  }
+}
+
+// ---- PPF 2.0: 任务状态持久化 ----
+
+export async function persistTaskStatus(
+  projectPath: string,
+  moduleSlug: string,
+  taskId: string,
+  status: TaskStatus
+): Promise<void> {
+  if (isTauri()) {
+    // TODO: Tauri mode support
+    return
+  }
+  await httpPut(plansUrl(projectPath, 'tasks', 'status'), {
+    moduleSlug,
+    taskId,
+    status,
+  })
+}
+
+// ---- PPF 2.0: 事件查询 ----
+
+export async function queryEvents(
+  projectPath: string,
+  query?: Partial<EventQuery>
+): Promise<PPFEvent[]> {
+  if (isTauri()) {
+    // TODO: Tauri mode support
+    return []
+  }
+  const params = new URLSearchParams()
+  if (query?.from_date) params.set('from_date', query.from_date)
+  if (query?.to_date) params.set('to_date', query.to_date)
+  if (query?.type) params.set('type', query.type)
+  if (query?.limit) params.set('limit', String(query.limit))
+  if (query?.offset) params.set('offset', String(query.offset))
+
+  const qs = params.toString()
+  const url = plansUrl(projectPath, 'events') + (qs ? `?${qs}` : '')
+  const data = await httpGet<{ events: PPFEvent[] }>(url)
+  return data.events
+}
+
+// ---- PPF 2.0: Markdown 带锚点导出 ----
+
+export async function exportMarkdownWithAnchors(
+  projectPath: string
+): Promise<string> {
+  if (isTauri()) {
+    // TODO: Tauri mode support
+    throw new Error('Tauri mode not supported yet')
+  }
+  const data = await httpGet<{ markdown: string }>(
+    plansUrl(projectPath, 'markdown')
+  )
+  return data.markdown
+}
+
+// ---- PPF 2.0: Markdown AST 导入 ----
+
+export interface MarkdownImportResult {
+  project: Record<string, unknown>
+  modules: ReadonlyArray<{
+    ppf_id: string | null
+    module: string
+    slug: string
+    status: string
+    priority: string
+    depends_on: readonly string[]
+    overview: string
+    tasks: ReadonlyArray<{
+      ppf_id: string | null
+      id: string
+      title: string
+      status: string
+    }>
+  }>
+  anchorsFound: number
+  newContentCount: number
+  unmatchedContent: readonly string[]
+}
+
+export async function importMarkdownAST(
+  projectPath: string,
+  markdown: string
+): Promise<MarkdownImportResult> {
+  if (isTauri()) {
+    // TODO: Tauri mode support
+    throw new Error('Tauri mode not supported yet')
+  }
+  return httpPost<MarkdownImportResult>(
+    plansUrl(projectPath, 'markdown'),
+    { markdown }
+  )
+}

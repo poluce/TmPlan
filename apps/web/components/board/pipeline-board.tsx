@@ -8,7 +8,7 @@ import { PipelineLayer } from './pipeline-layer'
 import { ModuleCard } from './module-card'
 import { TaskCard } from './task-card'
 import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface PipelineBoardProps {
   projectPath?: string
@@ -31,12 +31,38 @@ export function PipelineBoard({ projectPath, initialModules, projectId }: Pipeli
   } = useBoardStore()
 
   useEffect(() => {
+    console.info('[PipelineBoard] init', {
+      projectPath,
+      projectId,
+      initialModulesCount: initialModules?.length ?? 0,
+    })
+
     if (initialModules) {
+      console.info('[PipelineBoard] using initial modules', {
+        projectPath,
+        projectId,
+        modulesCount: initialModules.length,
+      })
       setModules(initialModules)
       const inProgress = initialModules.find((m) => m.status === 'in_progress')
-      selectModule(inProgress?.slug ?? initialModules[0]?.slug ?? null)
+      const nextSelectedModule = inProgress?.slug ?? initialModules[0]?.slug ?? null
+      console.info('[PipelineBoard] selecting initial module', {
+        projectPath,
+        projectId,
+        selectedModule: nextSelectedModule,
+      })
+      selectModule(nextSelectedModule)
     } else if (projectPath) {
-      fetchModules(projectPath)
+      console.info('[PipelineBoard] fetching modules from projectPath', {
+        projectPath,
+        projectId,
+      })
+      void fetchModules(projectPath)
+    } else {
+      console.warn('[PipelineBoard] missing projectPath and initialModules; board may be empty', {
+        projectPath,
+        projectId,
+      })
     }
   }, [projectPath, initialModules, projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -124,7 +150,15 @@ export function PipelineBoard({ projectPath, initialModules, projectId }: Pipeli
       {/* Tab switcher — only show when feature layer has modules */}
       {hasFeatureLayer && (
         <div className="border-b px-4 pt-2">
-          <Tabs value={activeLayer} onValueChange={(v) => setActiveLayer(v as 'feature' | 'implementation')}>
+          <Tabs value={activeLayer} onValueChange={(v) => {
+            console.info('[PipelineBoard] switching layer', {
+              projectPath,
+              projectId,
+              from: activeLayer,
+              to: v,
+            })
+            setActiveLayer(v as 'feature' | 'implementation')
+          }}>
             <TabsList>
               <TabsTrigger value="feature">功能规划</TabsTrigger>
               <TabsTrigger value="implementation">实现规划</TabsTrigger>

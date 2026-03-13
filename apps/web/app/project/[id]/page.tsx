@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useState } from 'react'
+import { use, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { PipelineBoard } from '@/components/board/pipeline-board'
 import { AiGuidePanel } from '@/components/guide/ai-guide-panel'
@@ -26,8 +26,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const searchParams = useSearchParams()
   const projectId = decodeURIComponent(id)
   const isNew = searchParams.get('new') === '1'
-  const enabledDocPaths = useSettingsStore((s) =>
-    s.docPaths.filter((docPath) => docPath.enabled).map((docPath) => docPath.path)
+  const docPaths = useSettingsStore((s) => s.docPaths)
+  const enabledDocPaths = useMemo(
+    () => docPaths.filter((docPath) => docPath.enabled).map((docPath) => docPath.path),
+    [docPaths]
   )
 
   const guideReset = useGuideStore((s) => s.reset)
@@ -163,7 +165,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           ) : activeTab === 'progress' ? (
             <ProgressPanel projectPath={projectId} />
           ) : (
-            <PipelineBoard projectId={projectId} />
+            <PipelineBoard projectPath={projectId} projectId={projectId} />
           )}
         </div>
       </div>

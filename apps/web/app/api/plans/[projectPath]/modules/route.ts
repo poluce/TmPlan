@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readAllModules } from '@/lib/tmplan/reader'
+import { readAllModules, readPlanModules } from '@/lib/tmplan/reader'
 import { writeModule } from '@/lib/tmplan/writer'
 import type { ModulePlan } from '@/types/tmplan'
 
@@ -11,7 +11,15 @@ export async function GET(
     const { projectPath } = await params
     const basePath = decodeURIComponent(projectPath)
     const modules = await readAllModules(basePath)
-    return NextResponse.json(modules)
+    const planModules = await readPlanModules(basePath)
+    const existingSlugs = new Set(modules.map((m) => m.slug))
+    const merged = [
+      ...modules,
+      ...planModules
+        .filter((m) => !existingSlugs.has(m.slug))
+        .map((m) => ({ ...m, source: 'converted' as const })),
+    ]
+    return NextResponse.json(merged)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 500 })

@@ -12,15 +12,24 @@ export interface ModelProfile {
   modelName: string
 }
 
+export interface DocPath {
+  path: string
+  enabled: boolean
+}
+
 interface SettingsState {
   profiles: ModelProfile[]
   activeProfileId: string | null
+  docPaths: DocPath[]
 
   addProfile: (profile: Omit<ModelProfile, 'id'>) => string
   updateProfile: (id: string, patch: Partial<Omit<ModelProfile, 'id'>>) => void
   deleteProfile: (id: string) => void
   setActiveProfileId: (id: string | null) => void
   getActiveProfile: () => ModelProfile | null
+  addDocPath: (path: string) => void
+  removeDocPath: (path: string) => void
+  toggleDocPath: (path: string) => void
 }
 
 const DEFAULT_BASE_URLS: Record<ModelType, string> = {
@@ -54,6 +63,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set, get) => ({
       profiles: [],
       activeProfileId: null,
+      docPaths: [{ path: 'docs', enabled: true }],
 
       addProfile: (profile) => {
         const id = generateId()
@@ -93,14 +103,36 @@ export const useSettingsStore = create<SettingsState>()(
         const { profiles, activeProfileId } = get()
         return profiles.find((p) => p.id === activeProfileId) ?? null
       },
+
+      addDocPath: (path) => {
+        set((s) => {
+          if (s.docPaths.some((d) => d.path === path)) return s
+          return { docPaths: [...s.docPaths, { path, enabled: true }] }
+        })
+      },
+
+      removeDocPath: (path) => {
+        set((s) => ({
+          docPaths: s.docPaths.filter((d) => d.path !== path),
+        }))
+      },
+
+      toggleDocPath: (path) => {
+        set((s) => ({
+          docPaths: s.docPaths.map((d) =>
+            d.path === path ? { ...d, enabled: !d.enabled } : d
+          ),
+        }))
+      },
     }),
     {
       name: 'tmplan-settings',
-      version: 2,
+      version: 3,
       migrate: (persisted: unknown, version: number) => {
+        const state = persisted as Record<string, unknown>
         if (version === 0 || version === 1) {
           // Migrate from v1 single-config format
-          const old = persisted as Partial<V1State> & Record<string, unknown>
+          const old = state as Partial<V1State> & Record<string, unknown>
           if (old.apiKey || old.baseUrl || old.modelType) {
             const id = generateId()
             const modelType = old.modelType || 'openai'
@@ -115,9 +147,14 @@ export const useSettingsStore = create<SettingsState>()(
             return {
               profiles: [profile],
               activeProfileId: id,
+              docPaths: [{ path: 'docs', enabled: true }],
             }
           }
-          return { profiles: [], activeProfileId: null }
+          return { profiles: [], activeProfileId: null, docPaths: [{ path: 'docs', enabled: true }] }
+        }
+        if (version === 2) {
+          // v2 -> v3: add docPaths
+          return { ...state, docPaths: [{ path: 'docs', enabled: true }] }
         }
         return persisted as SettingsState
       },

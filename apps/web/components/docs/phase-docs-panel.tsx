@@ -1,14 +1,11 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useGuideStore, GUIDE_PHASES } from '@/stores/guide-store'
 import type { PhaseResult } from '@/stores/guide-store'
-import { useBoardStore } from '@/stores/board-store'
-import { useActiveProfile } from '@/stores/settings-store'
-import { ChevronDown, ChevronRight, Lock, CheckCircle2, Download, Upload, Loader2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { generateMarkdown, downloadMarkdown } from '@/lib/export-markdown'
-import { toast } from 'sonner'
+import type { DocFile } from '@/lib/tmplan/data-access'
+import { ChevronDown, ChevronRight, Lock, CheckCircle2, FileText, Loader2, Circle } from 'lucide-react'
+import type { ConvertProgress } from '@/lib/tmplan/data-access'
 
 function PhaseContent({ result }: { result: PhaseResult }) {
   if (result.phase === 'concept') {
@@ -76,201 +73,126 @@ const PHASE_LABELS: Record<string, string> = {
   'tech-impl': '技术实现',
 }
 
-export function PhaseDocsPanel() {
+export function PhaseDocsPanel({ projectDocs = [], convertProgress }: { projectDocs?: DocFile[]; convertProgress?: ConvertProgress | null }) {
   const phaseResults = useGuideStore((s) => s.phaseResults)
-  const importPhaseResults = useGuideStore((s) => s.importPhaseResults)
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null)
-  const [importing, setImporting] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  const activeProfile = useActiveProfile()
-  const { updateProjectMeta, addFeatureModules, addImplModules } = useBoardStore()
+  const [expandedDoc, setExpandedDoc] = useState<string | null>(null)
 
   const completedSlugs = new Set(phaseResults.map((r) => r.phase))
   const resultMap = new Map(phaseResults.map((r) => [r.phase, r]))
 
-  function handleExport() {
-    const md = generateMarkdown(phaseResults)
-    const concept = phaseResults.find((r) => r.phase === 'concept')
-    const filename = concept?.project_name || '项目计划'
-    downloadMarkdown(md, filename)
-  }
-
-  async function handleImport(file: File) {
-    if (!activeProfile?.apiKey) {
-      toast.error('请先在设置中配置 API Key')
-      return
-    }
-
-    if (file.size > 200 * 1024) {
-      toast.error('文件过大，请上传 200KB 以内的文件')
-      return
-    }
-
-    setImporting(true)
-    try {
-      const markdown = await file.text()
-
-      const res = await fetch('/api/ai/parse-markdown', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          markdown,
-          apiKey: activeProfile.apiKey,
-          baseUrl: activeProfile.baseUrl,
-          modelName: activeProfile.modelName,
-          modelType: activeProfile.modelType,
-        }),
-      })
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: '解析失败' }))
-        throw new Error(err.error || `HTTP ${res.status}`)
-      }
-
-      const { phases } = await res.json() as { phases: PhaseResult[] }
-
-      if (!phases || phases.length === 0) {
-        toast.error('未能从文档中解析出有效的计划数据')
-        return
-      }
-
-      // Import to guide store
-      importPhaseResults(phases)
-
-      // Sync to board store (same logic as ai-guide-panel.tsx handleConfirmPhase)
-      for (const r of phases) {
-        if (r.phase === 'concept') {
-          updateProjectMeta(r.project_name, r.description)
-        } else if (r.phase === 'features') {
-          addFeatureModules(r.modules)
-        } else if (r.phase === 'ui-pages') {
-          addFeatureModules(r.pages)
-        } else if (r.phase === 'tech-impl') {
-          const now = new Date().toISOString()
-          addImplModules(
-            r.modules.map((m) => ({
-              module: m.module,
-              slug: m.slug,
-              layer: 'implementation' as const,
-              status: 'pending' as const,
-              depends_on: m.depends_on || [],
-              decision_refs: [],
-              overview: m.overview,
-              priority: (m.priority || 'medium') as 'low' | 'medium' | 'high' | 'critical',
-              estimated_hours: null,
-              created_at: now,
-              updated_at: now,
-              tasks: (m.tasks || []).map((t) => ({
-                id: t.id,
-                title: t.title,
-                status: 'pending' as const,
-                depends_on: t.depends_on || [],
-                detail: t.detail,
-                files_to_create: t.files_to_create || [],
-                files_to_modify: t.files_to_modify || [],
-                acceptance_criteria: t.acceptance_criteria || [],
-              })),
-            }))
-          )
-        }
-      }
-
-      toast.success(`成功导入 ${phases.length} 个阶段的数据`)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '导入失败')
-    } finally {
-      setImporting(false)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
-      }
-    }
-  }
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (file) handleImport(file)
-  }
+  const hasContent = phaseResults.length > 0 || projectDocs.length > 0
 
   return (
     <div className="flex h-full flex-col">
-      {/* Toolbar */}
-      <div className="sticky top-0 z-10 flex items-center justify-end gap-2 border-b bg-background px-4 py-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".md,.markdown,.txt"
-          className="hidden"
-          onChange={handleFileChange}
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={importing}
-        >
-          {importing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-          {importing ? '解析中...' : '导入'}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleExport}
-          disabled={phaseResults.length === 0}
-        >
-          <Download className="size-3.5" />
-          导出
-        </Button>
-      </div>
-
-      {/* Content */}
-      {phaseResults.length === 0 ? (
+      {!hasContent ? (
         <div className="flex flex-1 items-center justify-center p-8">
           <p className="text-sm text-muted-foreground text-center">
             请通过左侧 AI 引导完成各阶段规划，或导入已有的 Markdown 计划文档
           </p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {GUIDE_PHASES.map(({ slug }) => {
-            const completed = completedSlugs.has(slug)
-            const expanded = expandedPhase === slug
-            const result = resultMap.get(slug)
-
-            if (!completed) {
-              return (
-                <div
-                  key={slug}
-                  className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-3 text-muted-foreground/50"
-                >
-                  <Lock className="size-4" />
-                  <span className="text-sm">{PHASE_LABELS[slug]}</span>
-                </div>
-              )
-            }
-
-            return (
-              <div key={slug} className="rounded-lg border bg-muted/30">
-                <button
-                  className="flex w-full items-center gap-2 px-4 py-3 text-left"
-                  onClick={() => setExpandedPhase(expanded ? null : slug)}
-                >
-                  {expanded ? (
-                    <ChevronDown className="size-4 shrink-0" />
-                  ) : (
-                    <ChevronRight className="size-4 shrink-0" />
-                  )}
-                  <span className="text-sm font-medium flex-1">{PHASE_LABELS[slug]}</span>
-                  <CheckCircle2 className="size-4 text-green-500 shrink-0" />
-                </button>
-                {expanded && result && (
-                  <div className="px-4 pb-4">
-                    <PhaseContent result={result} />
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Project docs from /docs directory */}
+          {projectDocs.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground px-1">项目文档</p>
+              {projectDocs.map((doc) => {
+                const expanded = expandedDoc === doc.path
+                return (
+                  <div key={doc.path} className="rounded-lg border bg-muted/30">
+                    <button
+                      className="flex w-full items-center gap-2 px-4 py-3 text-left"
+                      onClick={() => setExpandedDoc(expanded ? null : doc.path)}
+                    >
+                      {expanded ? (
+                        <ChevronDown className="size-4 shrink-0" />
+                      ) : (
+                        <ChevronRight className="size-4 shrink-0" />
+                      )}
+                      <FileText className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="text-sm font-medium flex-1 truncate">{doc.name}</span>
+                      <span className="text-xs text-muted-foreground shrink-0">{doc.path}</span>
+                      {convertProgress && (() => {
+                        const status = convertProgress.docStatus[doc.path]
+                        if (status === 'reading') return <Loader2 className="size-4 animate-spin text-blue-500 shrink-0" />
+                        if (status === 'done') return <CheckCircle2 className="size-4 text-green-500 shrink-0" />
+                        if (status === 'pending') return <Circle className="size-4 text-muted-foreground/40 shrink-0" />
+                        return null
+                      })()}
+                    </button>
+                    {expanded && (
+                      <div className="px-4 pb-4">
+                        <pre className="whitespace-pre-wrap text-sm text-muted-foreground bg-background rounded-md p-3 border max-h-96 overflow-y-auto">
+                          {doc.content}
+                        </pre>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
-          })}
+                )
+              })}
+              {convertProgress && convertProgress.overall !== 'idle' && (
+                <div className="flex items-center gap-2 px-2 py-1.5 text-xs">
+                  {convertProgress.overall === 'done' ? (
+                    <CheckCircle2 className="size-3.5 text-green-500 shrink-0" />
+                  ) : convertProgress.overall === 'error' ? (
+                    <Circle className="size-3.5 text-red-500 shrink-0" />
+                  ) : (
+                    <Loader2 className="size-3.5 animate-spin text-blue-500 shrink-0" />
+                  )}
+                  <span className={convertProgress.overall === 'error' ? 'text-red-500' : 'text-muted-foreground'}>
+                    {convertProgress.message}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+          {phaseResults.length > 0 && (
+            <div className="space-y-2">
+              {projectDocs.length > 0 && (
+                <p className="text-xs font-medium text-muted-foreground px-1">规划阶段</p>
+              )}
+              {GUIDE_PHASES.map(({ slug }) => {
+                const completed = completedSlugs.has(slug)
+                const expanded = expandedPhase === slug
+                const result = resultMap.get(slug)
+
+                if (!completed) {
+                  return (
+                    <div
+                      key={slug}
+                      className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-3 text-muted-foreground/50"
+                    >
+                      <Lock className="size-4" />
+                      <span className="text-sm">{PHASE_LABELS[slug]}</span>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div key={slug} className="rounded-lg border bg-muted/30">
+                    <button
+                      className="flex w-full items-center gap-2 px-4 py-3 text-left"
+                      onClick={() => setExpandedPhase(expanded ? null : slug)}
+                    >
+                      {expanded ? (
+                        <ChevronDown className="size-4 shrink-0" />
+                      ) : (
+                        <ChevronRight className="size-4 shrink-0" />
+                      )}
+                      <span className="text-sm font-medium flex-1">{PHASE_LABELS[slug]}</span>
+                      <CheckCircle2 className="size-4 text-green-500 shrink-0" />
+                    </button>
+                    {expanded && result && (
+                      <div className="px-4 pb-4">
+                        <PhaseContent result={result} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

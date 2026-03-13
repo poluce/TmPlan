@@ -7,6 +7,10 @@ import { convertDocsStream, readAllModules } from '@/lib/tmplan/data-access'
 import type { DocFile, ConvertProgress, ConvertStreamEvent } from '@/lib/tmplan/data-access'
 import { toast } from 'sonner'
 
+function createConvertTraceId() {
+  return `convert_${Date.now()}_${crypto.randomUUID()}`
+}
+
 interface UseDocumentConverterOptions {
   projectId: string
   projectDocs: DocFile[]
@@ -96,9 +100,20 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
     setConvertProgress(initialProgress)
 
     const controller = new AbortController()
+    const traceId = createConvertTraceId()
     abortRef.current = controller
 
     try {
+      console.info('[convert][client] start', {
+        traceId,
+        projectId,
+        docsCount: projectDocs.length,
+        docPaths: projectDocs.map((doc) => doc.path),
+        modelType: activeProfile.modelType,
+        modelName: activeProfile.modelName,
+        baseUrlConfigured: Boolean(activeProfile.baseUrl),
+      })
+
       await convertDocsStream(
         projectId,
         projectDocs,
@@ -107,8 +122,14 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
           baseUrl: activeProfile.baseUrl,
           modelName: activeProfile.modelName,
           modelType: activeProfile.modelType,
+          traceId,
         },
         (event: ConvertStreamEvent) => {
+          console.info('[convert][client] progress', {
+            traceId,
+            projectId,
+            step: event.step,
+          })
           setConvertProgress((prev) => {
             if (!prev) return prev
             return updateProgressFromEvent(prev, event)
@@ -118,6 +139,11 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
       )
 
       const modules = await readAllModules(projectId)
+      console.info('[convert][client] completed', {
+        traceId,
+        projectId,
+        modulesCount: modules.length,
+      })
       setModules(modules)
       setConvertProgress((prev) => {
         if (!prev) return prev
@@ -126,9 +152,18 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
       })
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
+        console.info('[convert][client] aborted', {
+          traceId,
+          projectId,
+        })
         return
       }
       const message = error instanceof Error ? error.message : '转换失败'
+      console.error('[convert][client] failed', {
+        traceId,
+        projectId,
+        error: message,
+      })
       toast.error(message)
       setConvertProgress((prev) => prev ? { ...prev, overall: 'error', message } : null)
     } finally {

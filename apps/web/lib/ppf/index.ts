@@ -105,3 +105,8 @@ export type {
   Commit,
   GitHubClientOptions,
 } from "./github-client";
+
+// ============================================================
+// PPF Service 层
+// ============================================================
+export { ppfService } from "./ppf-service";

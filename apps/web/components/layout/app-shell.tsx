@@ -2,6 +2,7 @@
 
 import { Sidebar } from "./sidebar"
 import { Topbar } from "./topbar"
+import { DevContextMenu } from "../dev/dev-context-menu"
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -11,6 +12,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Topbar />
         <main className="flex-1 overflow-y-auto">{children}</main>
       </div>
+      {process.env.NODE_ENV === 'development' && <DevContextMenu />}
     </div>
   )
 }

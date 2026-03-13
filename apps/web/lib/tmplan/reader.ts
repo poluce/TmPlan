@@ -47,8 +47,7 @@ export async function readModule(
   )
 }
 
-export async function readAllModules(basePath: string): Promise<ModulePlan[]> {
-  const dir = tmplanPath(basePath, 'modules')
+async function readModuleFiles(dir: string): Promise<ModulePlan[]> {
   let files: string[]
   try {
     files = await readdir(dir)
@@ -58,10 +57,20 @@ export async function readAllModules(basePath: string): Promise<ModulePlan[]> {
     }
     throw err
   }
+
   const yamlFiles = files.filter((f) => f.endsWith('.yaml')).sort()
   return Promise.all(
     yamlFiles.map((f) => readYaml(join(dir, f), ModulePlanSchema))
   )
+}
+
+export async function readAllModules(basePath: string): Promise<ModulePlan[]> {
+  const modules = await readModuleFiles(tmplanPath(basePath, 'modules'))
+  if (modules.length > 0) {
+    return modules
+  }
+
+  return readModuleFiles(tmplanPath(basePath, 'plans', 'modules'))
 }
 
 export async function readAllDecisions(
@@ -103,6 +112,29 @@ export async function readPhases(basePath: string): Promise<PhaseConfig[]> {
     yamlFiles.map((f) => readYaml(join(dir, f), PhaseConfigSchema))
   )
   return phases.sort((a, b) => a.order - b.order)
+}
+
+// ---- Plans sub-directory (converted from docs) ----
+
+export async function readPlanModules(basePath: string): Promise<ModulePlan[]> {
+  const dir = tmplanPath(basePath, 'plans', 'modules')
+  let files: string[]
+  try {
+    files = await readdir(dir)
+  } catch (err: unknown) {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return []
+    }
+    throw err
+  }
+  const yamlFiles = files.filter((f) => f.endsWith('.yaml')).sort()
+  return Promise.all(
+    yamlFiles.map((f) => readYaml(join(dir, f), ModulePlanSchema))
+  )
+}
+
+export async function readPlanProject(basePath: string): Promise<ProjectConfig> {
+  return readYaml(tmplanPath(basePath, 'plans', 'project.yaml'), ProjectConfigSchema)
 }
 
 export async function readStatus(basePath: string): Promise<ProjectStatus> {

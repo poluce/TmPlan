@@ -1,0 +1,2 @@
+[  278778ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7247/ingest/f09f13ce-513f-48bb-a217-03ad6ede38e0:0
+[  278779ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:7247/ingest/f09f13ce-513f-48bb-a217-03ad6ede38e0:0

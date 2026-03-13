@@ -9,6 +9,7 @@ interface BoardState {
   activeLayer: 'feature' | 'implementation'
   projectName: string
   projectDescription: string
+  projectPath: string | null
 
   fetchModules: (projectPath: string) => Promise<void>
   selectModule: (slug: string) => void
@@ -28,14 +29,26 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   activeLayer: 'implementation',
   projectName: '',
   projectDescription: '',
+  projectPath: null,
 
   fetchModules: async (projectPath: string) => {
-    set({ loading: true, error: null })
+    console.info('[board-store] fetchModules:start', { projectPath })
+    set({ loading: true, error: null, projectPath })
     try {
       const { readAllModules } = await import('@/lib/tmplan/data-access')
       const modules = await readAllModules(projectPath)
+      console.info('[board-store] fetchModules:success', {
+        projectPath,
+        modulesCount: modules.length,
+        featureModulesCount: modules.filter((module) => module.layer === 'feature').length,
+        implementationModulesCount: modules.filter((module) => (module.layer ?? 'implementation') === 'implementation').length,
+      })
       set({ modules, loading: false })
     } catch (err) {
+      console.error('[board-store] fetchModules:error', {
+        projectPath,
+        error: err instanceof Error ? err.message : err,
+      })
       set({
         error: err instanceof Error ? err.message : 'Unknown error',
         loading: false,
@@ -48,7 +61,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   updateTaskStatus: (moduleSlug: string, taskId: string, status: TaskStatus) => {
-    const modules = get().modules.map((mod) => {
+    const prevModules = get().modules
+    // 乐观更新 UI
+    const modules = prevModules.map((mod) => {
       if (mod.slug !== moduleSlug) return mod
       return {
         ...mod,
@@ -58,6 +73,17 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       }
     })
     set({ modules })
+
+    // 异步持久化到文件系统
+    const projectPath = get().projectPath
+    if (projectPath) {
+      import('@/lib/tmplan/data-access').then(({ persistTaskStatus }) => {
+        persistTaskStatus(projectPath, moduleSlug, taskId, status).catch(() => {
+          // 持久化失败，回滚
+          set({ modules: prevModules })
+        })
+      })
+    }
   },
 
   setModules: (modules: ModulePlan[]) => {

@@ -1,17 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
-  Zap,
-  MessageSquare,
   Settings,
   FolderOpen,
   ChevronDown,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -26,8 +25,13 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const currentProjectId = pathname.match(/\/project\/([^/]+)/)?.[1]
-  const projects = useProjectStore((s) => s.listProjects())
+  const rawProjects = useProjectStore((s) => s.projects)
+  const projects = useMemo(
+    () => [...rawProjects].sort((a, b) => new Date(b.lastOpenedAt).getTime() - new Date(a.lastOpenedAt).getTime()),
+    [rawProjects]
+  )
   const addProject = useProjectStore((s) => s.addProject)
+  const removeProject = useProjectStore((s) => s.removeProject)
 
   return (
     <aside
@@ -106,21 +110,40 @@ export function Sidebar() {
             </div>
             {showProjects && (
               <nav className="mt-1 space-y-0.5">
-                {projects.map((project) => (
-                  <Link
-                    key={project.path}
-                    href={`/project/${encodeURIComponent(project.path)}`}
-                    className={cn(
-                      "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                      currentProjectId && decodeURIComponent(currentProjectId) === project.path
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                        : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                    )}
-                  >
-                    <FolderOpen className="size-4 shrink-0" />
-                    <span className="truncate">{project.name}</span>
-                  </Link>
-                ))}
+                {projects.map((project) => {
+                  const isActive = currentProjectId && decodeURIComponent(currentProjectId) === project.path
+                  return (
+                    <div
+                      key={project.path}
+                      className={cn(
+                        "group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                        isActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                          : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      )}
+                    >
+                      <Link
+                        href={`/project/${encodeURIComponent(project.path)}`}
+                        className="flex flex-1 items-center gap-2 min-w-0"
+                      >
+                        <FolderOpen className="size-4 shrink-0" />
+                        <span className="truncate">{project.name}</span>
+                      </Link>
+                      <button
+                        className="shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
+                        title="关闭项目"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          removeProject(project.path)
+                          if (isActive) router.push('/projects')
+                        }}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  )
+                })}
               </nav>
             )}
           </>
@@ -145,42 +168,6 @@ export function Sidebar() {
             ))}
           </nav>
         )}
-      </div>
-
-      <Separator />
-
-      {/* Quick Actions */}
-      <div className={cn("space-y-1 px-2 py-2", collapsed && "flex flex-col items-center")}>
-        <Button
-          variant="ghost"
-          size={collapsed ? "icon-sm" : "sm"}
-          className={cn("w-full", !collapsed && "justify-start")}
-          title="新增模块"
-          onClick={() => toast.info("新增模块功能开发中")}
-        >
-          <Plus className="size-4" />
-          {!collapsed && <span>新增模块</span>}
-        </Button>
-        <Button
-          variant="ghost"
-          size={collapsed ? "icon-sm" : "sm"}
-          className={cn("w-full", !collapsed && "justify-start")}
-          title="手动检查"
-          onClick={() => toast.info("手动检查功能开发中")}
-        >
-          <Zap className="size-4" />
-          {!collapsed && <span>手动检查</span>}
-        </Button>
-        <Button
-          variant="ghost"
-          size={collapsed ? "icon-sm" : "sm"}
-          className={cn("w-full", !collapsed && "justify-start")}
-          title="AI对话"
-          onClick={() => toast.info("AI对话功能开发中")}
-        >
-          <MessageSquare className="size-4" />
-          {!collapsed && <span>AI对话</span>}
-        </Button>
       </div>
 
       <Separator />
