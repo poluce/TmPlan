@@ -40,7 +40,7 @@ export function ModuleCard({
     >
       <span className="text-sm font-medium">{name}</span>
       <span className="mt-1 text-xs text-muted-foreground">
-        {cfg.icon} {completedCount}/{totalCount}
+        {cfg.icon} {cfg.label} {completedCount}/{totalCount} 项
       </span>
     </button>
   )

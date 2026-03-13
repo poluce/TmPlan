@@ -235,8 +235,14 @@ pub fn read_project(base_path: String) -> Result<ProjectConfig, String> {
 
 #[tauri::command]
 pub fn read_all_modules(base_path: String) -> Result<Vec<ModulePlan>, String> {
-    let dir_path = tmplan_path(&base_path).join("modules");
-    read_yaml_dir(&dir_path)
+    let modules_dir = tmplan_path(&base_path).join("modules");
+    let modules = read_yaml_dir(&modules_dir)?;
+    if !modules.is_empty() {
+        return Ok(modules);
+    }
+
+    let plan_modules_dir = tmplan_path(&base_path).join("plans").join("modules");
+    read_yaml_dir(&plan_modules_dir)
 }
 
 #[tauri::command]
@@ -318,4 +324,60 @@ pub fn init_tmplan(base_path: String) -> Result<(), String> {
 pub fn check_tmplan_exists(path: String) -> Result<bool, String> {
     let tmplan = Path::new(&path).join(TMPLAN_DIR);
     Ok(tmplan.exists() && tmplan.is_dir())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn make_temp_root() -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("tmplan-fs-commands-{}", unique));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn read_all_modules_falls_back_to_plans_modules_when_modules_dir_is_missing() {
+        let root = make_temp_root();
+        let base_path = root.to_string_lossy().to_string();
+        let plans_dir = root.join(".tmplan").join("plans").join("modules");
+        fs::create_dir_all(&plans_dir).unwrap();
+        fs::write(
+            plans_dir.join("feature-a.yaml"),
+            r#"module: Feature A
+slug: feature-a
+layer: implementation
+status: pending
+priority: medium
+depends_on: []
+decision_refs: []
+overview: Example module
+estimated_hours: null
+created_at: 2026-03-13T00:00:00.000Z
+updated_at: 2026-03-13T00:00:00.000Z
+tasks:
+  - id: feature-a-01
+    title: First task
+    status: pending
+    depends_on: []
+    detail: do something
+    files_to_create: []
+    files_to_modify: []
+    acceptance_criteria: []
+"#,
+        ).unwrap();
+
+        let modules = read_all_modules(base_path).unwrap();
+
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0].slug, "feature-a");
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }
