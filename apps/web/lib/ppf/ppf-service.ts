@@ -10,14 +10,14 @@ import { registerAllHandlers } from "./handlers"
 import { appendEvent, queryEvents } from "./event-store"
 import { renderProjectToMarkdown, type RenderOptions } from "./markdown-renderer"
 import { parseMarkdownToPPF, type ParseResult } from "./markdown-parser"
+import { changeTaskStatus as persistTaskStatus } from "@/lib/tmplan/operations"
 import { readAllModules, readProject } from "@/lib/tmplan/reader"
-import { writeModule } from "@/lib/tmplan/writer"
 import { migrateModule } from "./migrate"
 import type { Action, ActionResult } from "@/types/action-protocol"
 import { generateActionId } from "@/types/action-protocol"
 import { generateEventId, type PPFEvent, type EventQuery } from "@/types/event-sourcing"
-import type { PPFProject, PPFModule } from "@/types/ppf"
-import type { ModulePlan, TaskStatus } from "@/types/tmplan"
+import type { PPFProject } from "@/types/ppf"
+import type { TaskStatus } from "@/types/tmplan"
 
 // ============================================================
 // PPFService 单例
@@ -91,17 +91,8 @@ class PPFService {
         return { success: true }
       }
 
-      // 不可变更新
       const now = new Date().toISOString()
-      const updatedModule: ModulePlan = {
-        ...mod,
-        tasks: mod.tasks.map((t) =>
-          t.id === taskId ? { ...t, status: newStatus } : t
-        ),
-        updated_at: now,
-      }
-
-      await writeModule(basePath, updatedModule)
+      await persistTaskStatus(basePath, moduleSlug, taskId, newStatus)
 
       // 记录事件
       const event: PPFEvent = {

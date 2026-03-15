@@ -5,6 +5,8 @@ export {
   readAllDecisions,
   readPhases,
   readStatus,
+  readImportManifest,
+  readFieldSourceRegistry,
 } from './reader'
 
 export {
@@ -13,7 +15,13 @@ export {
   writeDecision,
   writePhase,
   updateStatus,
+  appendImportRecord,
+  appendImportMetadata,
+  appendFieldSourceRecords,
+  getDecisionFileName,
   initTmplan,
+  removeStaleDecisionFiles,
+  removeStaleModuleFiles,
 } from './writer'
 
 export {

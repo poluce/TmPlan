@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { createDefaultDocPaths, migrateDocPaths } from './doc-paths'
 
 export type ModelType = 'openai' | 'claude' | 'custom'
 
@@ -63,7 +64,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set, get) => ({
       profiles: [],
       activeProfileId: null,
-      docPaths: [{ path: 'docs', enabled: true }],
+      docPaths: createDefaultDocPaths(),
 
       addProfile: (profile) => {
         const id = generateId()
@@ -127,9 +128,10 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'tmplan-settings',
-      version: 3,
+      version: 4,
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>
+        const docPaths = migrateDocPaths(state.docPaths, version)
         if (version === 0 || version === 1) {
           // Migrate from v1 single-config format
           const old = state as Partial<V1State> & Record<string, unknown>
@@ -147,16 +149,20 @@ export const useSettingsStore = create<SettingsState>()(
             return {
               profiles: [profile],
               activeProfileId: id,
-              docPaths: [{ path: 'docs', enabled: true }],
+              docPaths,
             }
           }
-          return { profiles: [], activeProfileId: null, docPaths: [{ path: 'docs', enabled: true }] }
+          return { profiles: [], activeProfileId: null, docPaths }
         }
         if (version === 2) {
           // v2 -> v3: add docPaths
-          return { ...state, docPaths: [{ path: 'docs', enabled: true }] }
+          return { ...state, docPaths }
         }
-        return persisted as SettingsState
+        if (version === 3) {
+          // v3 -> v4: default docs-only scanning upgraded to recursive project-root scanning
+          return { ...state, docPaths }
+        }
+        return { ...state, docPaths } as SettingsState
       },
     }
   )

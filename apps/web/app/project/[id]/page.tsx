@@ -6,6 +6,7 @@ import { PipelineBoard } from '@/components/board/pipeline-board'
 import { AiGuidePanel } from '@/components/guide/ai-guide-panel'
 import { PhaseDocsPanel } from '@/components/docs/phase-docs-panel'
 import { GitInfoPanel } from '@/components/project/git-info-panel'
+import { ProjectOverview } from '@/components/project/project-overview'
 import { ProgressPanel } from '@/components/project/progress-panel'
 import { EventTimeline } from '@/components/project/event-timeline'
 import { ProjectToolbar } from '@/components/project/project-toolbar'
@@ -37,7 +38,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const updateProject = useProjectStore((s) => s.updateProject)
 
   const [showGuide, setShowGuide] = useState(isNew)
-  const [activeTab, setActiveTab] = useState<ProjectTabValue>('docs')
+  const [activeTab, setActiveTab] = useState<ProjectTabValue>('overview')
   const [projectDocs, setProjectDocs] = useState<DocFile[]>([])
 
   const { fileInputRef, importing, handleFileChange } = useProjectImport({ projectId })
@@ -156,7 +157,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         </div>
 
         <div className="flex-1 overflow-hidden">
-          {activeTab === 'docs' ? (
+          {activeTab === 'overview' ? (
+            <ProjectOverview projectPath={projectId} projectDocs={projectDocs} />
+          ) : activeTab === 'docs' ? (
             <PhaseDocsPanel projectDocs={projectDocs} convertProgress={convertProgress} />
           ) : activeTab === 'events' ? (
             <EventTimeline projectPath={projectId} />

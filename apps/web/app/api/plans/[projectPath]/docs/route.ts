@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readFile, readdir } from 'fs/promises'
-import { join, extname } from 'path'
+import { collectMarkdownDocs } from '@/lib/tmplan/doc-discovery'
 
 export async function GET(
   req: NextRequest,
@@ -16,29 +15,7 @@ export async function GET(
     }
 
     const dirs = pathsParam.split(',').map((p) => p.trim()).filter(Boolean)
-    const files: { path: string; name: string; content: string }[] = []
-
-    for (const dir of dirs) {
-      const fullDir = join(basePath, dir)
-      let entries: string[]
-      try {
-        entries = await readdir(fullDir)
-      } catch {
-        // Directory doesn't exist, skip
-        continue
-      }
-
-      const mdFiles = entries.filter((f) => extname(f).toLowerCase() === '.md')
-
-      for (const name of mdFiles) {
-        try {
-          const content = await readFile(join(fullDir, name), 'utf-8')
-          files.push({ path: `${dir}/${name}`, name, content })
-        } catch {
-          // Skip unreadable files
-        }
-      }
-    }
+    const files = await collectMarkdownDocs(basePath, dirs)
 
     return NextResponse.json({ files })
   } catch (err) {

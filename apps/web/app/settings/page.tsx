@@ -179,7 +179,7 @@ function DocsSection() {
       <div>
         <h2 className="text-lg font-semibold">文档读取路径</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          配置项目中需要读取的文档目录（相对于项目根目录），支持 .md 文件
+          配置项目中需要递归读取的文档路径（相对于项目根目录）。`.` 表示整个项目目录，会自动识别所有 `.md` 文件
         </p>
       </div>
 
@@ -187,7 +187,7 @@ function DocsSection() {
       <div className="flex gap-2">
         <input
           className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
-          placeholder="输入相对路径，如 docs 或 wiki"
+          placeholder="输入相对路径，如 .、docs 或 wiki"
           value={newPath}
           onChange={(e) => setNewPath(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}

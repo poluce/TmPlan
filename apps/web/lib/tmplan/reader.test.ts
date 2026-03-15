@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { readAllModules } from './reader.ts'
+import { readAllDecisions, readAllModules, readProject } from './reader'
 
 test('readAllModules falls back to .tmplan/plans/modules when .tmplan/modules is missing', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tmplan-reader-'))
@@ -43,6 +43,67 @@ test('readAllModules falls back to .tmplan/plans/modules when .tmplan/modules is
 
     assert.equal(modules.length, 1)
     assert.equal(modules[0]?.slug, 'feature-a')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('readProject falls back to .tmplan/plans/project.yaml when .tmplan/project.yaml is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tmplan-reader-'))
+
+  try {
+    const plansDir = join(root, '.tmplan', 'plans')
+    await mkdir(plansDir, { recursive: true })
+    await writeFile(
+      join(plansDir, 'project.yaml'),
+      [
+        'schema_version: "1.0"',
+        'name: Planned Project',
+        'description: from plans project',
+        'tech_stack: []',
+        'created_at: 2026-03-16T00:00:00.000Z',
+        'updated_at: 2026-03-16T00:00:00.000Z',
+      ].join('\n'),
+      'utf-8'
+    )
+
+    const project = await readProject(root)
+
+    assert.equal(project.name, 'Planned Project')
+    assert.equal(project.description, 'from plans project')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('readAllDecisions falls back to .tmplan/plans/decisions when .tmplan/decisions is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tmplan-reader-'))
+
+  try {
+    const plansDecisionsDir = join(root, '.tmplan', 'plans', 'decisions')
+    await mkdir(plansDecisionsDir, { recursive: true })
+    await writeFile(
+      join(plansDecisionsDir, '001-use-cache.yaml'),
+      [
+        'decision_id: 1',
+        'question: Use cache?',
+        'context: import from plan decisions',
+        'options_presented: []',
+        'chosen: yes',
+        'reason: performance',
+        'impact: []',
+        'affected_modules: []',
+        'decided_at: 2026-03-16T00:00:00.000Z',
+        'supersedes: null',
+      ].join('\n'),
+      'utf-8'
+    )
+
+    const decisions = await readAllDecisions(root)
+
+    assert.equal(decisions.length, 1)
+    assert.equal(decisions[0]?.decision_id, 1)
+    assert.equal(decisions[0]?.chosen, 'yes')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

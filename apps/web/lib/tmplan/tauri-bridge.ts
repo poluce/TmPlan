@@ -7,7 +7,20 @@ import type {
   ModulePlan,
   Decision,
   ProjectStatus,
+  TaskStatus,
 } from '@/types/tmplan'
+import type {
+  FieldSourceRecord,
+  FieldSourceRegistry,
+  ImportManifest,
+  ImportRecord,
+} from '@/types/tmplan-imports'
+import type { EventQuery, PPFEvent } from '@/types/event-sourcing'
+
+interface DecisionFileRef {
+  decision_id: number
+  question: string
+}
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
@@ -32,6 +45,15 @@ export async function readStatus(basePath: string): Promise<ProjectStatus> {
   return invoke<ProjectStatus>('read_status', { basePath })
 }
 
+export async function readImportMetadata(
+  basePath: string
+): Promise<{ manifest: ImportManifest; fieldSources: FieldSourceRegistry }> {
+  return invoke<{ manifest: ImportManifest; fieldSources: FieldSourceRegistry }>(
+    'read_import_metadata',
+    { basePath }
+  )
+}
+
 export async function writeProject(basePath: string, data: ProjectConfig): Promise<void> {
   return invoke<void>('write_project', { basePath, data })
 }
@@ -44,12 +66,47 @@ export async function writeDecision(basePath: string, data: Decision): Promise<v
   return invoke<void>('write_decision', { basePath, data })
 }
 
+export async function updateTaskStatus(
+  basePath: string,
+  moduleSlug: string,
+  taskId: string,
+  status: TaskStatus
+): Promise<void> {
+  return invoke<void>('update_task_status', { basePath, moduleSlug, taskId, status })
+}
+
 export async function initTmplan(basePath: string): Promise<void> {
   return invoke<void>('init_tmplan', { basePath })
 }
 
+export async function appendImportMetadata(
+  basePath: string,
+  record: ImportRecord,
+  fieldRecords: FieldSourceRecord[]
+): Promise<void> {
+  return invoke<void>('append_import_metadata', { basePath, record, fieldRecords })
+}
+
+export async function removeStaleModuleFiles(basePath: string, moduleSlugs: string[]): Promise<void> {
+  return invoke<void>('remove_stale_module_files', { basePath, moduleSlugs })
+}
+
+export async function removeStaleDecisionFiles(
+  basePath: string,
+  decisions: DecisionFileRef[]
+): Promise<void> {
+  return invoke<void>('remove_stale_decision_files', { basePath, decisions })
+}
+
 export async function checkTmplanExists(path: string): Promise<boolean> {
   return invoke<boolean>('check_tmplan_exists', { path })
+}
+
+export async function queryEvents(
+  basePath: string,
+  query?: Partial<EventQuery>
+): Promise<PPFEvent[]> {
+  return invoke<PPFEvent[]>('query_events', { basePath, query: query ?? {} })
 }
 
 // ---- Dialog Commands ----

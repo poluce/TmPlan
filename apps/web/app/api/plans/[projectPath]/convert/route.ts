@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   initPlansDir,
+  appendImportMetadata,
   writePlanProject,
   writePlanModule,
   writePlanDecision,
   writePlanCache,
 } from '@/lib/tmplan/writer'
+import { readAllDecisions, readAllModules, readProject } from '@/lib/tmplan/reader'
 import { logServerError, logServerInfo, logServerWarn } from '@/lib/logging/server-logger'
+import type { Decision, ModulePlan, ProjectConfig } from '@/types/tmplan'
+import type { FieldSourceRecord, ImportRecord, MergeAction, MergeSummary } from '@/types/tmplan-imports'
 
 interface DocFile {
   path: string
@@ -247,14 +251,15 @@ const CONVERT_SYSTEM_PROMPT = `你是一个项目计划转换助手。你的任�
 3. 技术决策记录（如果文档中有相关内容）
 
 规则：
-1. 模块名称（module）必须使用中文，禁止输出英文模块名；只有 slug 可以是英文
-2. 任务标题（title）和任务详情（detail）优先使用中文，除非文档中只有不可翻译的专有名词
-3. slug 字段仍使用纯小写字母、数字和连字符（如 user-auth, data-sync）
-4. 任务 ID 格式：{module-slug}-{nn}，如 user-auth-01
-5. 尽量保留文档中的原始信息，不要过度概括或编造数据
-6. 如果文档中没有明确的决策记录，decisions 数组留空
-7. 每个模块至少提取一个任务
-8. 你必须调用 convert_docs 函数返回结果`
+1. 项目名称（project_name）、模块名称（module）和任务标题（title）优先使用中文；如果原文是可翻译的英文标题，输出自然中文标题，必要时可在括号中保留专有名词
+2. 模块名称（module）必须使用中文，禁止输出英文模块名；只有 slug 可以是英文
+3. 任务详情（detail）、模块概述（overview）和项目描述（project_description）优先使用中文，除非文档中只有不可翻译的专有名词
+4. slug 字段仍使用纯小写字母、数字和连字符（如 user-auth, data-sync）
+5. 任务 ID 格式：{module-slug}-{nn}，如 user-auth-01
+6. 尽量保留文档中的原始信息，不要过度概括或编造数据
+7. 如果文档中没有明确的决策记录，decisions 数组留空
+8. 每个模块至少提取一个任务
+9. 你必须调用 convert_docs 函数返回结果`
 
 const CONVERT_FUNCTION = {
   name: 'convert_docs',
@@ -262,17 +267,17 @@ const CONVERT_FUNCTION = {
   parameters: {
     type: 'object' as const,
     properties: {
-      project_name: { type: 'string', description: '项目名称' },
-      project_description: { type: 'string', description: '项目描述' },
+      project_name: { type: 'string', description: '项目名称，优先使用中文标题' },
+      project_description: { type: 'string', description: '项目描述，优先使用中文' },
       modules: {
         type: 'array',
         description: '功能模块列表',
         items: {
           type: 'object',
           properties: {
-            module: { type: 'string', description: '模块名称' },
+            module: { type: 'string', description: '模块名称，必须使用中文标题' },
             slug: { type: 'string', description: '模块标识符（小写字母、数字、连字符）' },
-            overview: { type: 'string', description: '模块概述' },
+            overview: { type: 'string', description: '模块概述，优先使用中文' },
             priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
             depends_on: { type: 'array', items: { type: 'string' }, description: '依赖的模块 slug 列表' },
             tasks: {
@@ -281,8 +286,8 @@ const CONVERT_FUNCTION = {
                 type: 'object',
                 properties: {
                   id: { type: 'string', description: '任务 ID，格式 {module-slug}-{nn}' },
-                  title: { type: 'string' },
-                  detail: { type: 'string' },
+                  title: { type: 'string', description: '任务标题，优先使用中文标题' },
+                  detail: { type: 'string', description: '任务详情，优先使用中文' },
                   depends_on: { type: 'array', items: { type: 'string' } },
                   files_to_create: { type: 'array', items: { type: 'string' } },
                   files_to_modify: { type: 'array', items: { type: 'string' } },
@@ -314,6 +319,154 @@ const CONVERT_FUNCTION = {
     },
     required: ['project_name', 'modules'],
   },
+}
+
+function normalizeText(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function getDocLabel(docs: DocFile[]): string {
+  const names = docs.map((doc) => doc.name || doc.path.split(/[\\/]/).pop() || doc.path)
+  if (names.length <= 2) {
+    return `文档转换/${names.join(', ')}`
+  }
+  return `文档转换/${names[0]}, ${names[1]} 等 ${names.length} 篇文档`
+}
+
+function summarizeMergeActions(actions: MergeAction[]): MergeSummary {
+  const summary: MergeSummary = {
+    filled: 0,
+    replaced: 0,
+    appended: 0,
+    conflicts: 0,
+    staged: 0,
+  }
+
+  for (const action of actions) {
+    if (action === 'fill') summary.filled += 1
+    else if (action === 'replace') summary.replaced += 1
+    else if (action === 'append') summary.appended += 1
+    else if (action === 'conflict') summary.conflicts += 1
+    else summary.staged += 1
+  }
+
+  return summary
+}
+
+function computeProjectDefinitionMergeAction(
+  existingProject: ProjectConfig | null,
+  projectName: string,
+  projectDescription: string
+): MergeAction {
+  const existingName = existingProject?.name?.trim() || ''
+  const existingDescription = existingProject?.description?.trim() || ''
+  const incomingName = projectName.trim()
+  const incomingDescription = projectDescription.trim()
+
+  if (!existingName && !existingDescription) return 'fill'
+
+  const sameName = !incomingName || normalizeText(existingName) === normalizeText(incomingName)
+  const sameDescription = !incomingDescription || normalizeText(existingDescription) === normalizeText(incomingDescription)
+
+  if (sameName && sameDescription) return 'append'
+  return 'conflict'
+}
+
+function computeModuleMergeAction(existingModules: ModulePlan[], importedModules: ModulePlan[]): MergeAction {
+  if (importedModules.length === 0) return 'staged'
+  if (existingModules.length === 0) return 'fill'
+
+  const existingBySlug = new Map(existingModules.map((module) => [module.slug, module]))
+  const hasConflict = importedModules.some((module) => {
+    const existing = existingBySlug.get(module.slug)
+    return existing ? normalizeText(existing.module) !== normalizeText(module.module) : false
+  })
+
+  return hasConflict ? 'conflict' : 'append'
+}
+
+function computeDecisionMergeAction(existingDecisions: Decision[], importedDecisions: Decision[]): MergeAction {
+  if (importedDecisions.length === 0) return 'staged'
+  if (existingDecisions.length === 0) return 'fill'
+
+  const existingById = new Map(existingDecisions.map((decision) => [decision.decision_id, decision]))
+  const hasConflict = importedDecisions.some((decision) => {
+    const existing = existingById.get(decision.decision_id)
+    return existing
+      ? normalizeText(existing.question) !== normalizeText(decision.question)
+        || normalizeText(existing.chosen) !== normalizeText(decision.chosen)
+      : false
+  })
+
+  return hasConflict ? 'conflict' : 'append'
+}
+
+function buildFieldSourceRecords(options: {
+  importId: string
+  recordedAt: string
+  docs: DocFile[]
+  projectDefinitionAction: MergeAction
+  moduleAction: MergeAction
+  decisionAction: MergeAction
+  projectName: string
+  projectDescription: string
+  modules: ModulePlan[]
+  decisions: Decision[]
+}): FieldSourceRecord[] {
+  const sourceLabel = getDocLabel(options.docs)
+  const sourceFiles = options.docs.map((doc) => doc.path)
+  const records: FieldSourceRecord[] = []
+
+  if (options.projectName || options.projectDescription) {
+    records.push({
+      field_key: 'project-definition',
+      source_type: 'doc-convert',
+      source_label: sourceLabel,
+      source_files: sourceFiles,
+      import_id: options.importId,
+      recorded_at: options.recordedAt,
+      merge_action: options.projectDefinitionAction,
+      value_preview: [options.projectName, options.projectDescription].filter(Boolean).join(' · '),
+    })
+  }
+
+  if (options.modules.length > 0) {
+    records.push({
+      field_key: 'feature-scope',
+      source_type: 'doc-convert',
+      source_label: sourceLabel,
+      source_files: sourceFiles,
+      import_id: options.importId,
+      recorded_at: options.recordedAt,
+      merge_action: options.moduleAction,
+      value_preview: `${options.modules.length} 个模块`,
+    })
+    records.push({
+      field_key: 'execution-plan',
+      source_type: 'doc-convert',
+      source_label: sourceLabel,
+      source_files: sourceFiles,
+      import_id: options.importId,
+      recorded_at: options.recordedAt,
+      merge_action: options.moduleAction,
+      value_preview: `${options.modules.length} 个模块 / ${options.modules.reduce((sum, module) => sum + module.tasks.length, 0)} 个任务`,
+    })
+  }
+
+  if (options.decisions.length > 0) {
+    records.push({
+      field_key: 'decisions',
+      source_type: 'doc-convert',
+      source_label: sourceLabel,
+      source_files: sourceFiles,
+      import_id: options.importId,
+      recorded_at: options.recordedAt,
+      merge_action: options.decisionAction,
+      value_preview: `${options.decisions.length} 条决策`,
+    })
+  }
+
+  return records
 }
 
 // ---- Route handler ----
@@ -414,17 +567,6 @@ export async function POST(
         await initPlansDir(basePath)
         const now = new Date().toISOString()
 
-        if (result.project_name) {
-          await writePlanProject(basePath, {
-            schema_version: '1.0',
-            name: result.project_name,
-            description: result.project_description || '',
-            tech_stack: [],
-            created_at: now,
-            updated_at: now,
-          })
-        }
-
         // Write modules
         const modules: ModulePlan[] = (result.modules || []).map((m: any) => ({
           module: m.module,
@@ -475,6 +617,54 @@ export async function POST(
           supersedes: null,
         }))
 
+        const [existingProject, existingModules, existingDecisions] = await Promise.all([
+          readProject(basePath).catch(() => null),
+          readAllModules(basePath).catch(() => []),
+          readAllDecisions(basePath).catch(() => []),
+        ])
+
+        const projectDefinitionAction = computeProjectDefinitionMergeAction(
+          existingProject,
+          result.project_name || '',
+          result.project_description || ''
+        )
+        const moduleAction = computeModuleMergeAction(existingModules, modules)
+        const decisionAction = computeDecisionMergeAction(existingDecisions, decisions)
+        const importFieldRecords = buildFieldSourceRecords({
+          importId: traceId,
+          recordedAt: now,
+          docs: body.docs,
+          projectDefinitionAction,
+          moduleAction,
+          decisionAction,
+          projectName: result.project_name || '',
+          projectDescription: result.project_description || '',
+          modules,
+          decisions,
+        })
+        const importRecord: ImportRecord = {
+          import_id: traceId,
+          imported_at: now,
+          source_type: 'doc-convert',
+          source_files: body.docs.map((doc) => doc.path),
+          field_keys: importFieldRecords.map((record) => record.field_key),
+          project_name: result.project_name || '',
+          modules_imported: modules.map((module) => module.slug),
+          decisions_imported: decisions.map((decision) => decision.decision_id),
+          merge_summary: summarizeMergeActions(importFieldRecords.map((record) => record.merge_action)),
+        }
+
+        if (result.project_name) {
+          await writePlanProject(basePath, {
+            schema_version: '1.0',
+            name: result.project_name,
+            description: result.project_description || '',
+            tech_stack: [],
+            created_at: now,
+            updated_at: now,
+          })
+        }
+
         for (const dec of decisions) {
           send({ step: 'writing_decision', id: dec.decision_id })
           await logConvert('info', traceId, 'Writing decision', {
@@ -489,10 +679,12 @@ export async function POST(
           docsCount: body.docs.length,
           result,
         })
+        await appendImportMetadata(basePath, importRecord, importFieldRecords)
 
         await logConvert('info', traceId, 'Convert request completed', {
           modulesCount: modules.length,
           decisionsCount: decisions.length,
+          mergeSummary: importRecord.merge_summary,
         })
         send({ step: 'done', modules: modules.length, decisions: decisions.length })
       } catch (e) {

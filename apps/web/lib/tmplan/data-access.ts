@@ -10,7 +10,14 @@ import type {
   ProjectStatus,
   TaskStatus,
 } from '@/types/tmplan'
+import type {
+  FieldSourceRegistry,
+  FieldSourceRecord,
+  ImportManifest,
+  ImportRecord,
+} from '@/types/tmplan-imports'
 import type { PPFEvent, EventQuery } from '@/types/event-sourcing'
+import { generatePPFId, type PPFModule, type PPFProject } from '@/types/ppf'
 
 // Lazy-load tauri bridge to avoid import errors in web mode
 async function bridge() {
@@ -60,6 +67,44 @@ async function httpPut<T>(url: string, body: unknown): Promise<T> {
 function plansUrl(projectPath: string, ...segments: string[]): string {
   const base = `/api/plans/${encodeURIComponent(projectPath)}`
   return segments.length > 0 ? `${base}/${segments.join('/')}` : base
+}
+
+function toPpfProjectForMarkdownExport(project: ProjectConfig): PPFProject {
+  return {
+    ...project,
+    schema_version: '2.0',
+    ppf_id: (project as Record<string, unknown>).ppf_id as string ?? 'ppf_project_temp',
+    extensions: {},
+    plan_version: 1,
+    plan_status: 'active',
+    metadata: {
+      target_users: [],
+      ui_pages: [],
+      source: '',
+      tags: [],
+    },
+    modules: [],
+    decisions: [],
+    phases: [],
+  }
+}
+
+function toPpfModulesForMarkdownExport(modules: ModulePlan[]): PPFModule[] {
+  return modules.map((module) => ({
+    ...module,
+    ppf_id: generatePPFId(),
+    extensions: {},
+    tags: [],
+    source: '',
+    tasks: module.tasks.map((task) => ({
+      ...task,
+      ppf_id: generatePPFId(),
+      extensions: {},
+      assignee: '',
+      tags: [],
+      due_date: null,
+    })),
+  }))
 }
 
 // ---- Public API ----
@@ -161,6 +206,35 @@ export async function readDocs(
   const url = `${plansUrl(projectPath, 'docs')}?paths=${encodeURIComponent(relativePaths.join(','))}`
   const data = await httpGet<{ files: DocFile[] }>(url)
   return data.files
+}
+
+export async function readImportMetadata(
+  projectPath: string
+): Promise<{ manifest: ImportManifest; fieldSources: FieldSourceRegistry }> {
+  if (isTauri()) {
+    const b = await bridge()
+    return b.readImportMetadata(projectPath)
+  }
+
+  return httpGet<{ manifest: ImportManifest; fieldSources: FieldSourceRegistry }>(
+    plansUrl(projectPath, 'imports')
+  )
+}
+
+export async function appendImportMetadata(
+  projectPath: string,
+  record: ImportRecord,
+  fieldRecords: FieldSourceRecord[]
+): Promise<void> {
+  if (isTauri()) {
+    const b = await bridge()
+    return b.appendImportMetadata(projectPath, record, fieldRecords)
+  }
+
+  await httpPost(plansUrl(projectPath, 'imports'), {
+    record,
+    fieldRecords,
+  })
 }
 
 // ---- 文档转换 ----
@@ -266,8 +340,8 @@ export async function persistTaskStatus(
   status: TaskStatus
 ): Promise<void> {
   if (isTauri()) {
-    // TODO: Tauri mode support
-    return
+    const b = await bridge()
+    return b.updateTaskStatus(projectPath, moduleSlug, taskId, status)
   }
   await httpPut(plansUrl(projectPath, 'tasks', 'status'), {
     moduleSlug,
@@ -283,8 +357,8 @@ export async function queryEvents(
   query?: Partial<EventQuery>
 ): Promise<PPFEvent[]> {
   if (isTauri()) {
-    // TODO: Tauri mode support
-    return []
+    const b = await bridge()
+    return b.queryEvents(projectPath, query)
   }
   const params = new URLSearchParams()
   if (query?.from_date) params.set('from_date', query.from_date)
@@ -305,8 +379,15 @@ export async function exportMarkdownWithAnchors(
   projectPath: string
 ): Promise<string> {
   if (isTauri()) {
-    // TODO: Tauri mode support
-    throw new Error('Tauri mode not supported yet')
+    const [{ renderProjectToMarkdown }, project, modules] = await Promise.all([
+      import('@/lib/ppf/markdown-renderer'),
+      readProject(projectPath),
+      readAllModules(projectPath),
+    ])
+    return renderProjectToMarkdown(
+      toPpfProjectForMarkdownExport(project),
+      toPpfModulesForMarkdownExport(modules)
+    )
   }
   const data = await httpGet<{ markdown: string }>(
     plansUrl(projectPath, 'markdown')
@@ -343,8 +424,9 @@ export async function importMarkdownAST(
   markdown: string
 ): Promise<MarkdownImportResult> {
   if (isTauri()) {
-    // TODO: Tauri mode support
-    throw new Error('Tauri mode not supported yet')
+    void projectPath
+    const { parseMarkdownToPPF } = await import('@/lib/ppf/markdown-parser')
+    return parseMarkdownToPPF(markdown)
   }
   return httpPost<MarkdownImportResult>(
     plansUrl(projectPath, 'markdown'),

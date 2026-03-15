@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { queryEvents } from '@/lib/tmplan/data-access'
+import { subscribeProjectUpdated } from '@/lib/tmplan/client-events'
 import type { PPFEvent } from '@/types/event-sourcing'
 import { ChevronDown, ChevronRight, Clock, Filter } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -176,8 +177,16 @@ export function EventTimeline({ projectPath }: { readonly projectPath: string })
   }, [projectPath, typeFilter])
 
   useEffect(() => {
-    loadEvents()
-  }, [loadEvents])
+    void loadEvents()
+
+    const unsubscribe = subscribeProjectUpdated((updatedProjectPath) => {
+      if (updatedProjectPath === projectPath) {
+        void loadEvents()
+      }
+    })
+
+    return unsubscribe
+  }, [loadEvents, projectPath])
 
   const grouped = groupByDate(events)
   // 按日期倒序

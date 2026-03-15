@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { appendServerLog, getServerLogFilePath } from './server-logger.ts'
+import { appendServerLog, getServerLogFilePath } from './server-logger'
 
 test('getServerLogFilePath creates module subdirectory with daily log filename', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tmplan-logs-'))

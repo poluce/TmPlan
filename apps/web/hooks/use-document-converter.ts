@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useBoardStore } from '@/stores/board-store'
 import { useActiveProfile } from '@/stores/settings-store'
 import { convertDocsStream, readAllModules } from '@/lib/tmplan/data-access'
+import { dispatchProjectUpdated } from '@/lib/tmplan/client-events'
 import type { DocFile, ConvertProgress, ConvertStreamEvent } from '@/lib/tmplan/data-access'
 import { toast } from 'sonner'
 
@@ -145,6 +146,7 @@ export function useDocumentConverter({ projectId, projectDocs }: UseDocumentConv
         modulesCount: modules.length,
       })
       setModules(modules)
+      dispatchProjectUpdated(projectId)
       setConvertProgress((prev) => {
         if (!prev) return prev
         toast.success(prev.message)

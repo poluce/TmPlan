@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { dispatchProjectUpdated } from '@/lib/tmplan/client-events'
 import type { ModulePlan, TaskStatus } from '@/types/tmplan'
 
 interface BoardState {
@@ -12,7 +13,7 @@ interface BoardState {
   projectPath: string | null
 
   fetchModules: (projectPath: string) => Promise<void>
-  selectModule: (slug: string) => void
+  selectModule: (slug: string | null) => void
   updateTaskStatus: (moduleSlug: string, taskId: string, status: TaskStatus) => void
   setModules: (modules: ModulePlan[]) => void
   setActiveLayer: (layer: 'feature' | 'implementation') => void
@@ -56,7 +57,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }
   },
 
-  selectModule: (slug: string) => {
+  selectModule: (slug: string | null) => {
     set({ selectedModule: slug })
   },
 
@@ -78,10 +79,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const projectPath = get().projectPath
     if (projectPath) {
       import('@/lib/tmplan/data-access').then(({ persistTaskStatus }) => {
-        persistTaskStatus(projectPath, moduleSlug, taskId, status).catch(() => {
-          // 持久化失败，回滚
-          set({ modules: prevModules })
-        })
+        persistTaskStatus(projectPath, moduleSlug, taskId, status)
+          .then(() => {
+            dispatchProjectUpdated(projectPath)
+          })
+          .catch(() => {
+            // 持久化失败，回滚
+            set({ modules: prevModules })
+          })
       })
     }
   },

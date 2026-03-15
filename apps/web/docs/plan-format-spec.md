@@ -1,6 +1,9 @@
 # TmPlan 统一计划格式规范 v1.0
 
 > 本文档定义了 TmPlan 项目计划的规范格式，涵盖数据模型、生命周期管理、模块操作、导入导出等全部方面。
+>
+> 上层标准请配合阅读：
+> `docs/project-definition-standard.md`
 
 ---
 

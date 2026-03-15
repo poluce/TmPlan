@@ -10,7 +10,7 @@ interface PipelineLayerProps {
 
 export function PipelineLayer({ columns }: PipelineLayerProps) {
   return (
-    <div className="flex items-start gap-1 overflow-x-auto pb-2">
+    <div className="flex items-start gap-1 overflow-x-auto px-1 pt-2 pb-2">
       {columns.map((column, colIdx) => (
         <div key={colIdx} className="flex items-start">
           {colIdx > 0 && <DependencyArrow />}

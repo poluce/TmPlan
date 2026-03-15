@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { GuidePhaseSlug, PhaseContext, ContextSummary } from '@/lib/ai/prompts'
+import { dispatchProjectUpdated } from '@/lib/tmplan/client-events'
 
 // ---- 类型定义 ----
 
@@ -54,6 +55,7 @@ export interface ModulePlanResult {
   slug: string
   overview: string
   priority?: 'low' | 'medium' | 'high' | 'critical'
+  layer?: 'feature' | 'implementation'
   depends_on: string[]
   tasks: TaskResult[]
 }
@@ -414,36 +416,48 @@ export const useGuideStore = create<GuideState>()(
     try {
       const { isTauri } = await import('@/lib/platform')
       if (isTauri()) {
-        const bridge = await import('@/lib/tmplan/tauri-bridge')
         const da = await import('@/lib/tmplan/data-access')
+        const { buildAiGuideImportMetadata } = await import('@/lib/tmplan/import-records')
+        const tauriBridge = await import('@/lib/tmplan/tauri-bridge')
+        const importId = `ai-guide_${Date.now()}_${crypto.randomUUID()}`
         // Write project config
         const now = new Date().toISOString()
+        const [existingProject, existingModules, existingDecisions] = await Promise.all([
+          da.readProject(projectPath).catch(() => null),
+          da.readAllModules(projectPath).catch(() => []),
+          da.readAllDecisions(projectPath).catch(() => []),
+        ])
+        const existingModulesBySlug = new Map(existingModules.map((module) => [module.slug, module]))
+        const existingDecisionsById = new Map(existingDecisions.map((decision) => [decision.decision_id, decision]))
         await da.writeProject(projectPath, {
           schema_version: '1.0',
           name: planResult.projectName,
           description: planResult.description,
           tech_stack: planResult.techStack,
-          created_at: now,
+          created_at: existingProject?.created_at || now,
           updated_at: now,
         })
         // Write modules
         for (const m of planResult.modules) {
+          const existingModule = existingModulesBySlug.get(m.slug)
+          const existingTasksById = new Map(existingModule?.tasks.map((task) => [task.id, task]) ?? [])
+          const layer = m.layer || (m.tasks.length > 0 ? 'implementation' : 'feature')
           await da.writeModule(projectPath, {
             module: m.module,
             slug: m.slug,
-            layer: 'implementation',
-            status: 'pending',
+            layer,
+            status: existingModule?.status ?? 'pending',
             depends_on: m.depends_on,
             decision_refs: [],
             overview: m.overview,
             priority: m.priority ?? 'medium',
             estimated_hours: null,
-            created_at: now,
+            created_at: existingModule?.created_at || now,
             updated_at: now,
             tasks: m.tasks.map((t) => ({
               id: t.id,
               title: t.title,
-              status: 'pending' as const,
+              status: existingTasksById.get(t.id)?.status ?? 'pending',
               depends_on: t.depends_on,
               detail: t.detail,
               files_to_create: t.files_to_create,
@@ -452,8 +466,13 @@ export const useGuideStore = create<GuideState>()(
             })),
           })
         }
+        await tauriBridge.removeStaleModuleFiles(
+          projectPath,
+          planResult.modules.map((module) => module.slug)
+        )
         // Write decisions
         for (const d of planResult.decisions) {
+          const existingDecision = existingDecisionsById.get(d.decision_id)
           await da.writeDecision(projectPath, {
             decision_id: d.decision_id,
             question: d.question,
@@ -463,10 +482,27 @@ export const useGuideStore = create<GuideState>()(
             reason: d.reason,
             impact: [],
             affected_modules: [],
-            decided_at: now,
+            decided_at: existingDecision?.decided_at || now,
             supersedes: null,
           })
         }
+        await tauriBridge.removeStaleDecisionFiles(
+          projectPath,
+          planResult.decisions.map((decision) => ({
+            decision_id: decision.decision_id,
+            question: decision.question,
+          }))
+        )
+        const { importRecord, fieldRecords } = buildAiGuideImportMetadata({
+          importId,
+          recordedAt: now,
+          existingProject,
+          existingModules,
+          existingDecisions,
+          planResult,
+        })
+        await da.appendImportMetadata(projectPath, importRecord, fieldRecords)
+        dispatchProjectUpdated(projectPath)
         return true
       }
       // Web mode: use HTTP API
@@ -479,6 +515,7 @@ export const useGuideStore = create<GuideState>()(
         const err = await res.json().catch(() => ({ error: '保存失败' }))
         throw new Error(err.error || `HTTP ${res.status}`)
       }
+      dispatchProjectUpdated(projectPath)
       return true
     } catch (e) {
       set({ error: e instanceof Error ? e.message : '保存失败' })

@@ -1,9 +1,9 @@
 'use client'
 
-import { FileText, GitBranch, History, LayoutDashboard, Zap } from 'lucide-react'
+import { ClipboardList, FileText, GitBranch, History, LayoutDashboard, Zap } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-export type ProjectTabValue = 'docs' | 'board' | 'git' | 'progress' | 'events'
+export type ProjectTabValue = 'overview' | 'docs' | 'board' | 'git' | 'progress' | 'events'
 
 interface ProjectTabNavProps {
   activeTab: ProjectTabValue
@@ -11,7 +11,7 @@ interface ProjectTabNavProps {
 }
 
 function isProjectTabValue(value: string): value is ProjectTabValue {
-  return value === 'docs' || value === 'board' || value === 'git' || value === 'progress' || value === 'events'
+  return value === 'overview' || value === 'docs' || value === 'board' || value === 'git' || value === 'progress' || value === 'events'
 }
 
 export function ProjectTabNav({ activeTab, onTabChange }: ProjectTabNavProps) {
@@ -22,6 +22,10 @@ export function ProjectTabNav({ activeTab, onTabChange }: ProjectTabNavProps) {
       }
     }}>
       <TabsList>
+        <TabsTrigger value="overview" className="gap-1.5">
+          <ClipboardList className="size-3.5" />
+          总览
+        </TabsTrigger>
         <TabsTrigger value="docs" className="gap-1.5">
           <FileText className="size-3.5" />
           文档
